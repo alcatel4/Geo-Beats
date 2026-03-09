@@ -19,11 +19,7 @@
 
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="TU_API_KEY_AQUI"/>
-
-        <queries>
-            <package android:name="com.spotify.music"/>
-        </queries>
+            android:value="AIzaSyDgA-UN8iWldlos79HFch8jN73C5y_c8T4"/>
 
         <activity
             android:name=".MainActivity"
