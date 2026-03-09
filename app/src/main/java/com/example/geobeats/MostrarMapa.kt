@@ -4,12 +4,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.gms.maps.MapView
 import com.google.android.gms.maps.GoogleMap
-import com.google.android.gms.maps.OnMapReadyCallback
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.MarkerOptions
 import android.content.Context
 
 @Composable
-//Carga el mapa con la Api de googleMaps
-fun MapScreen() {
+// Recibe la ubicación del usuario desde MainActivity
+fun MapScreen(userLocation: LatLng?) {
 
     AndroidView(
         factory = { context: Context ->
@@ -20,7 +22,23 @@ fun MapScreen() {
             mapView.onResume()
 
             mapView.getMapAsync { googleMap: GoogleMap ->
+
+                // Habilita controles de zoom
                 googleMap.uiSettings.isZoomControlsEnabled = true
+
+                // Si tenemos ubicación del usuario, centramos el mapa y agregamos marcador
+                userLocation?.let {
+
+                    googleMap.moveCamera(
+                        CameraUpdateFactory.newLatLngZoom(it, 15f)
+                    )
+
+                    googleMap.addMarker(
+                        MarkerOptions()
+                            .position(it)
+                            .title("Tu ubicación")
+                    )
+                }
             }
 
             mapView
