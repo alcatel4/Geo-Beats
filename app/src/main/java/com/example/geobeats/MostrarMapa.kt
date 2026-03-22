@@ -5,160 +5,212 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.MapView
 import com.google.android.gms.maps.model.*
 
+// Estructura para representar una zona musical
+data class ZonaMusical(
+    val nombre: String,
+    val coordenadas: LatLng,
+    val playlistUri: String,
+    val color: Int // Color en formato Hex ARGB
+)
+
 @Composable
 fun MapScreen(userLocation: LatLng?) {
-    // Puntos de interés predefinidos
-    val basilica = LatLng(9.8644, -83.9194)
-    val playlistUri = "spotify:playlist:37i9dQZF1DXcBWIGoYBMm1"
+    // Lista de playlists disponibles para elegir
+    val playlistsDisponibles = listOf(
+        "Urbano" to "spotify:playlist:37i9dQZF1DXcBWIGoYBMm1",
+        "Rock" to "spotify:playlist:37i9dQZF1DWXRqgorJjKmq",
+        "Pop" to "spotify:playlist:37i9dQZF1DX1Ng397pN6pZ",
+        "Chill" to "spotify:playlist:37i9dQZF1DX4sWvAiTneOx"
+    )
+
+    // Estado para las zonas musicales activas
+    val zonasMusicales = remember { mutableStateListOf<ZonaMusical>() }
     
-    // Estado para un punto seleccionado manualmente por el usuario
-    var puntoSeleccionado by remember { mutableStateOf<LatLng?>(null) }
+    // Inicializar con la Basílica como zona predeterminada
+    LaunchedEffect(Unit) {
+        if (zonasMusicales.isEmpty()) {
+            zonasMusicales.add(
+                ZonaMusical(
+                    "Basílica (Urbano)",
+                    LatLng(9.8644, -83.9194),
+                    "spotify:playlist:37i9dQZF1DXcBWIGoYBMm1",
+                    0x550000FF // Azul
+                )
+            )
+        }
+    }
+
+    // Estados para el diálogo de selección
+    var showPlaylistDialog by remember { mutableStateOf(false) }
+    var tempLatLng by remember { mutableStateOf<LatLng?>(null) }
     
-    // Flag para evitar que Spotify se abra repetidamente
+    // Control de reproducción
+    var zonaActivaNombre by remember { mutableStateOf<String?>(null) }
     var isMusicTriggered by remember { mutableStateOf(false) }
 
-    // Referencias para el mapa y marcadores
+    // Referencias del mapa
     var googleMapState by remember { mutableStateOf<GoogleMap?>(null) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
-    var destinationMarker by remember { mutableStateOf<Marker?>(null) }
-    var interestZoneCircle by remember { mutableStateOf<Circle?>(null) }
+    val marcadoresZonas = remember { mutableMapOf<String, Marker>() }
+    val circulosZonas = remember { mutableMapOf<String, Circle>() }
 
-    AndroidView(
-        factory = { ctx ->
-            MapView(ctx).apply {
-                onCreate(null)
-                onResume()
-                getMapAsync { map ->
-                    googleMapState = map
-                    map.uiSettings.isZoomControlsEnabled = true
-                    
-                    // Marcador fijo inicial (Basílica)
-                    map.addMarker(
-                        MarkerOptions()
-                            .position(basilica)
-                            .title("Zona Musical: Basílica")
-                            .snippet("Toca para abrir Spotify")
-                            .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE))
-                    )
-                    
-                    // Dibujar zona de interés inicial (100 metros)
-                    map.addCircle(
-                        CircleOptions()
-                            .center(basilica)
-                            .radius(100.0)
-                            .strokeWidth(2f)
-                            .strokeColor(0x550000FF) // Azul semi-transparente
-                            .fillColor(0x220000FF)   // Relleno muy transparente
-                    )
-
-                    // Listener para seleccionar un nuevo punto en el mapa
-                    map.setOnMapClickListener { latLng ->
-                        puntoSeleccionado = latLng
-                        isMusicTriggered = false // Resetear trigger para el nuevo punto
-                        Toast.makeText(ctx, "Nuevo punto de interés seleccionado", Toast.LENGTH_SHORT).show()
-                    }
-
-                    map.setOnMarkerClickListener { marker ->
-                        if (marker.position == basilica || marker.position == puntoSeleccionado) {
-                            abrirSpotify(ctx, playlistUri)
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                MapView(ctx).apply {
+                    onCreate(null)
+                    onResume()
+                    getMapAsync { map ->
+                        googleMapState = map
+                        map.uiSettings.isZoomControlsEnabled = true
+                        
+                        // Click en el mapa para crear nueva zona
+                        map.setOnMapClickListener { latLng ->
+                            tempLatLng = latLng
+                            showPlaylistDialog = true
                         }
-                        false
+
+                        map.setOnMarkerClickListener { marker ->
+                            val zona = zonasMusicales.find { it.nombre == marker.title }
+                            zona?.let { abrirSpotify(ctx, it.playlistUri) }
+                            false
+                        }
                     }
                 }
-            }
-        },
-        update = { mapView ->
-            googleMapState?.let { map ->
-                userLocation?.let { location ->
-                    // 1. Actualizar marcador del usuario
-                    if (userMarker == null) {
-                        userMarker = map.addMarker(
-                            MarkerOptions()
-                                .position(location)
-                                .title("Tu ubicación")
-                        )
-                        map.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15f))
-                    } else {
-                        userMarker?.position = location
-                    }
-
-                    // 2. Gestionar punto seleccionado manualmente
-                    puntoSeleccionado?.let { sel ->
-                        // Actualizar o crear marcador de destino
-                        if (destinationMarker == null) {
-                            destinationMarker = map.addMarker(
+            },
+            update = { view ->
+                googleMapState?.let { map ->
+                    // 1. Dibujar/Actualizar Zonas Musicales
+                    zonasMusicales.forEach { zona ->
+                        if (!marcadoresZonas.containsKey(zona.nombre)) {
+                            val marker = map.addMarker(
                                 MarkerOptions()
-                                    .position(sel)
-                                    .title("Destino Personalizado")
-                                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_MAGENTA))
+                                    .position(zona.coordenadas)
+                                    .title(zona.nombre)
+                                    .icon(BitmapDescriptorFactory.defaultMarker(
+                                        if (zona.color == 0x550000FF) BitmapDescriptorFactory.HUE_BLUE else BitmapDescriptorFactory.HUE_MAGENTA
+                                    ))
                             )
-                        } else {
-                            destinationMarker?.position = sel
-                        }
+                            marker?.let { marcadoresZonas[zona.nombre] = it }
 
-                        // Actualizar o crear círculo de zona de interés (100m)
-                        if (interestZoneCircle == null) {
-                            interestZoneCircle = map.addCircle(
+                            val circle = map.addCircle(
                                 CircleOptions()
-                                    .center(sel)
+                                    .center(zona.coordenadas)
                                     .radius(100.0)
                                     .strokeWidth(2f)
-                                    .strokeColor(0x55FF00FF) // Magenta semi-transparente
-                                    .fillColor(0x22FF00FF)   // Relleno muy transparente
+                                    .strokeColor(zona.color)
+                                    .fillColor(zona.color and 0x22FFFFFF)
                             )
-                        } else {
-                            interestZoneCircle?.center = sel
+                            circle?.let { circulosZonas[zona.nombre] = it }
                         }
                     }
 
-                    // 3. Lógica de proximidad (Geofencing)
-                    // Comprobar cercanía a la Basílica O al punto seleccionado
-                    val distBasilica = calcularDistancia(location.latitude, location.longitude, basilica.latitude, basilica.longitude)
-                    val distSeleccionado = puntoSeleccionado?.let { 
-                        calcularDistancia(location.latitude, location.longitude, it.latitude, it.longitude)
-                    } ?: Double.MAX_VALUE
+                    // 2. Actualizar Usuario
+                    userLocation?.let { location ->
+                        if (userMarker == null) {
+                            userMarker = map.addMarker(
+                                MarkerOptions().position(location).title("Tu ubicación")
+                            )
+                            map.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15f))
+                        } else {
+                            userMarker?.position = location
+                        }
 
-                    if ((distBasilica < 100 || distSeleccionado < 100) && !isMusicTriggered) {
-                        Toast.makeText(mapView.context, "¡Entrando en zona musical!", Toast.LENGTH_SHORT).show()
-                        abrirSpotify(mapView.context, playlistUri)
-                        isMusicTriggered = true
-                    } else if (distBasilica > 120 && distSeleccionado > 120) {
-                        isMusicTriggered = false
+                        // 3. Lógica de Proximidad Dinámica
+                        var algunaZonaCerca = false
+                        zonasMusicales.forEach { zona ->
+                            val distancia = calcularDistancia(
+                                location.latitude, location.longitude,
+                                zona.coordenadas.latitude, zona.coordenadas.longitude
+                            )
+
+                            if (distancia < 100) {
+                                algunaZonaCerca = true
+                                if (!isMusicTriggered || zonaActivaNombre != zona.nombre) {
+                                    Toast.makeText(view.context, "Entrando a: ${zona.nombre}", Toast.LENGTH_SHORT).show()
+                                    abrirSpotify(view.context, zona.playlistUri)
+                                    isMusicTriggered = true
+                                    zonaActivaNombre = zona.nombre
+                                }
+                            }
+                        }
+
+                        if (!algunaZonaCerca) {
+                            isMusicTriggered = false
+                            zonaActivaNombre = null
+                        }
                     }
                 }
             }
-        }
-    )
-}
+        )
 
-/**
- * Abre Spotify mediante un Intent Implícito.
- */
-fun abrirSpotify(context: Context, uri: String) {
-    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
-    intent.putExtra(Intent.EXTRA_REFERRER, Uri.parse("android-app://${context.packageName}"))
-
-    try {
-        context.startActivity(intent)
-    } catch (e: ActivityNotFoundException) {
-        Toast.makeText(context, "Spotify no instalado", Toast.LENGTH_LONG).show()
-        try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.spotify.music")))
-        } catch (ex: ActivityNotFoundException) {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.spotify.music")))
+        // Diálogo para elegir playlist al crear zona
+        if (showPlaylistDialog) {
+            AlertDialog(
+                onDismissRequest = { showPlaylistDialog = false },
+                title = { Text("Nueva Zona Musical") },
+                text = {
+                    Column {
+                        Text("Selecciona el género para este lugar:")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        playlistsDisponibles.forEach { (genero, uri) ->
+                            Button(
+                                onClick = {
+                                    tempLatLng?.let { latLng ->
+                                        zonasMusicales.add(
+                                            ZonaMusical(
+                                                "Zona $genero ${zonasMusicales.size}",
+                                                latLng,
+                                                uri,
+                                                0x55FF00FF // Magenta para personalizadas
+                                            )
+                                        )
+                                    }
+                                    showPlaylistDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            ) {
+                                Text(genero)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showPlaylistDialog = false }) {
+                        Text("Cancelar")
+                    }
+                }
+            )
         }
     }
 }
 
+fun abrirSpotify(context: Context, uri: String) {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+    intent.putExtra(Intent.EXTRA_REFERRER, Uri.parse("android-app://${context.packageName}"))
+    try {
+        context.startActivity(intent)
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "Spotify no instalado", Toast.LENGTH_LONG).show()
+        val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.spotify.music"))
+        try { context.startActivity(playStoreIntent) } catch (ex: Exception) {}
+    }
+}
+
 fun calcularDistancia(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    val R = 6371000.0 // Radio de la Tierra en metros
+    val R = 6371000.0
     val dLat = Math.toRadians(lat2 - lat1)
     val dLon = Math.toRadians(lon2 - lon1)
     val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
